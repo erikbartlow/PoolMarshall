@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict'),m=require('./app/pool-math.js');
+assert(Math.abs(m.volume('rectangle',30,15,3,6)-15148.052)<.01);
+assert.equal(m.dilution(100,10,.5),55);
+assert(Math.abs(m.dryDose(18000,1,3,100)-136.274824224)<1e-8);
+assert(Math.abs(m.dryDose(18000,1,3,65)-209.653575729)<1e-8);
+assert.equal(m.labelDose(18000,10,1.5,10000,10),2.7);
+assert.equal(m.carbonate(110,100,7.4),79);
+assert(Math.abs(m.lsi(7.6,77,250,120,3000)-.041)<.002);
+assert.equal(m.meter(1000,1100,12),200);
+assert.throws(()=>m.lsi(7.5,80,250,0,1000));
+assert.throws(()=>m.dryDose(18000,3,1,65));
+assert.throws(()=>m.dryDose(18000,1,3,0));
+assert.throws(()=>m.volume('rectangle',30,15,'',6));
+console.log('12 chemistry, unit conversion, boundary, and meter checks passed');

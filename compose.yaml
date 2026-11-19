@@ -1,0 +1,44 @@
+name: poolside
+services:
+  dashboard:
+    build: ./app
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    environment:
+      TZ: America/Chicago
+      POOLSIDE_PASSWORD: ${POOLSIDE_PASSWORD:?Set POOLSIDE_PASSWORD in .env}
+      AQUALINKD_URL: http://aqualinkd:80
+      POOL_CONTROL_ENABLED: ${POOL_CONTROL_ENABLED:-false}
+    volumes:
+      - poolside-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  aqualinkd:
+    image: sfeakes/aqualinkd:v3.1.0
+    platform: linux/arm64
+    profiles: [hardware]
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:6171:80"
+    devices:
+      - "${RS485_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"
+    volumes:
+      - ./config:/aquadconf
+      - /var/run/systemd/journal/socket:/var/run/systemd/journal/socket
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: America/Chicago
+    logging:
+      driver: journald
+volumes:
+  poolside-data:
