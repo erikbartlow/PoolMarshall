@@ -180,3 +180,30 @@ The conventional LSI expression is documented at https://poollab.poolpower.com.a
 CDC chemistry and handling references: https://www.cdc.gov/healthy-swimming/about/home-pool-and-hot-tub-water-treatment-and-testing.html and https://www.cdc.gov/healthy-swimming/media/pdfs/Pool-Chemical-Safety-USE-poster-p.pdf. Weather source: https://www.weather.gov/documentation/services-web-api. No chemicals are mixed or water-safety certification issued by this software.
 
 The update passed 12 server integration tests and 12 arithmetic/boundary checks, plus browser page/navigation and dose-output checks. Server tests include asset serving and mocked NWS fixed-host/caching behavior. The NWS live request, photo-capture hardware, offline reconnect lifecycle, ARM64 containers and physical RS485 control remain unverified in the preparation environment. Native share/calendar behavior depends on the browser/device. New names remain suggestions only; the current app name has not changed.
+
+
+## License keys
+
+PoolMarshall uses the SentinelWatch licensing model: offline ECDSA P256/SHA-256 signatures, customer and license ID, a three-part purchased version, and major-version coverage. PM1 keys are perpetual; PM2 keys grant a 30-day trial. Keys are product-specific and SentinelWatch keys cannot activate PoolMarshall. Signatures use the same 64-byte IEEE P1363 encoding as SentinelWatch.
+
+Sign in with the existing owner password, open **License**, and paste your key. Unlicensed installations redirect to activation; state, weather, and controller APIs require a valid license (HTTP 402). Authentication, health checks, static assets, and license activation remain available. Expiration never sends equipment commands. The separate native AqualinkD service is outside this dashboard's license checks. Browser records already saved locally remain on the device.
+
+Activation stores the key in the existing persistent SQLite volume, separately from pool records and backups. `POOLMARSHALL_LICENSE_KEY` supplies an optional initial key through Compose; an activated database key takes precedence. Trial start is installation-wide, survives restarts and replacement trial keys, and is not reset by pool-record imports. Preserve the data volume; offline trials depend on the installation's clock and storage.
+
+Install issuer/test dependencies with `python -m pip install -r app/requirements.txt`. The application contains only the existing SentinelWatch corporate **public** signing key; the corresponding private key stays with the authorized issuer. To issue a PoolMarshall key with that identity:
+
+```powershell
+python tools/license_issuer.py issue <private-key-path> "Customer name" 1.1.0
+python tools/license_issuer.py issue <private-key-path> "Customer name" 1.1.0 --trial-days 30
+```
+
+For a separate signing identity, run `python tools/license_issuer.py init <secure-private-key-path>` outside the repository and replace `app/license-public.pem` with the printed public PEM before building. Init refuses to overwrite an existing private key. Keep private keys out of source control, images, and customer installations. Changing the public key invalidates keys issued by the previous identity.
+
+
+### Jarvis license-requirement deployment — November 19, 2026
+
+Deployed dashboard version **1.1.1** as `poolmarshall:1.1.1-arm64`, image `sha256:7660ddd7c211a3b82937a5e1d9a9489a94221af350f5ca2abaa7d8e626ef24e4`. Only dashboard was rebuilt; existing `.env`, persistent records, hardware profile, and routing were preserved. Predeployment application/configuration and SQLite backup: `/home/codedthought/poolmarshall-backup-20261119-095147`.
+
+Validation: 19 server tests and 12 arithmetic checks passed. Deployed container is healthy; local sign-in, version, activation redirect, license status, and HTTP 402 gates passed. SQLite integrity is `ok`, with the existing state row retained. Public HTTPS health and login show version 1.1.1. Public authenticated activation was not separately tested; container-origin public checks encountered an upstream HTTP 403. No license was activated during deployment. Storefront automatic PoolMarshall key issuance/delivery remains pending; generic CT purchase keys cannot activate this release.
+
+Deployed footer adjustment as **1.1.2** on November 19, 2026: License now appears immediately to the right of CodedThought in the dashboard footer. Image: `sha256:91476a88de05b7dcfe170f71904312a6ed97ba7ed5bb5a4c2c96c8fd892d5233`. Verified the deployed footer markup and public login version (HTTP 200).

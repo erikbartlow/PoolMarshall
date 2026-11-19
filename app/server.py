@@ -1,8 +1,12 @@
 """Single-owner, private-network dashboard and read-only AqualinkD status bridge."""
+import sys
+from contextlib import contextmanager
 import hmac
 import json
 import os
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import licensing
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen, Request
@@ -24,10 +28,47 @@ AUTH_LOCK = threading.Lock()
 SESSION_SECONDS = 12 * 60 * 60
 VERSION = Path(__file__).with_name('VERSION').read_text().strip()
 
+@contextmanager
 def connect():
     db = sqlite3.connect(DB, timeout=10)
     db.execute('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, payload TEXT NOT NULL)')
-    return db
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
+
+LICENSE_PUBLIC_KEY = Path(__file__).with_name('license-public.pem').read_bytes()
+LICENSE_LOCK = threading.RLock()
+
+def license_status(activation=None):
+    with LICENSE_LOCK, connect() as db:
+        db.execute('CREATE TABLE IF NOT EXISTS licensing (name TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute("SELECT value FROM licensing WHERE name='key'").fetchone()
+        key = activation if activation is not None else (row[0] if row else os.environ.get('POOLMARSHALL_LICENSE_KEY', ''))
+        grant = licensing.verify(key, LICENSE_PUBLIC_KEY)
+        if activation is not None:
+            if grant is None:
+                raise ValueError('The license key is invalid or its signature could not be verified.')
+            if not licensing.covers(grant, VERSION):
+                raise ValueError('This key does not cover the installed major version.')
+            db.execute("INSERT OR REPLACE INTO licensing VALUES ('key', ?)", (key.strip(),))
+        expires = None
+        valid = grant is not None and licensing.covers(grant, VERSION)
+        if grant and grant['TrialDays'] == 30:
+            # Installation-wide start is retained when keys are replaced or upgraded.
+            row = db.execute("SELECT value FROM licensing WHERE name='trial_started'").fetchone()
+            start = float(row[0]) if row else time.time()
+            if not row:
+                db.execute("INSERT INTO licensing VALUES ('trial_started', ?)", (str(start),))
+            expires = start + 30 * 86400
+            valid = valid and start <= time.time() < expires
+        return dict(isValid=valid, applicationVersion=VERSION, customer=grant['Customer'] if grant else None,
+            purchasedVersion=grant['PurchasedVersion'] if grant else None, licenseId=grant['LicenseId'] if grant else None,
+            isTrial=bool(grant and grant['TrialDays']), trialExpiresAt=expires,
+            message=('Your 30-day free trial is active.' if expires else 'Licensed. Minor and build updates are included; a newer major version requires a new license.') if valid else
+                ('Your trial has expired. Activate a purchased license to continue.' if expires else 'A valid PoolMarshall license covering this major version is required.'))
 
 class Handler(BaseHTTPRequestHandler):
     def page(self, filename):
@@ -77,6 +118,13 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(401, {'error': 'Sign in to continue.'})
         return False
 
+    def licensed(self):
+        status = license_status()
+        if status["isValid"]:
+            return True
+        self.reply(402, {"error": status["message"], "license": status})
+        return False
+
     def do_GET(self):
         if self.path == '/healthz':
             return self.reply(200, {'ok': True})
@@ -89,6 +137,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/' and not self.session_valid():
             return self.redirect('/login')
         if not self.authorized():
+            return
+        if self.path == '/api/license':
+            return self.reply(200, license_status())
+        if self.path == '/license':
+            return self.reply(200, self.page('license.html'), 'text/html; charset=utf-8')
+        if self.path == '/' and not license_status()['isValid']:
+            return self.redirect('/license')
+        if self.path.startswith('/api/') and not self.licensed():
             return
         if self.path == '/':
             return self.reply(200, self.page('index.html'), 'text/html; charset=utf-8')
@@ -188,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.authorized():
             return
+        if not self.licensed():
+            return
         if self.path != '/api/command' or self.headers.get('X-Poolside-Write') != '1':
             return self.reply(403, {'error': 'Command not permitted'})
         if not CONTROL_ENABLED:
@@ -214,6 +272,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         if not self.authorized():
+            return
+        if self.path == '/api/license':
+            if self.headers.get('X-Poolside-Write') != '1':
+                return self.reply(403, {'error': 'Write not permitted'})
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 8192:
+                    raise ValueError('Invalid request size.')
+                body = json.loads(self.rfile.read(length))
+                key = body['key']
+                if not isinstance(key, str) or not key.strip():
+                    raise ValueError('Enter a license key.')
+                return self.reply(200, license_status(key))
+            except (ValueError, KeyError, TypeError) as error:
+                return self.reply(400, {'error': str(error) or 'Invalid license request.'})
+        if not self.licensed():
             return
         # Browser writes must be same-origin custom-header requests. No CORS is enabled.
         if self.path != '/api/state' or self.headers.get('X-Poolside-Write') != '1':

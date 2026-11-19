@@ -6,6 +6,7 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
     environment:
+      POOLMARSHALL_LICENSE_KEY: ${POOLMARSHALL_LICENSE_KEY:-}
       TZ: America/Chicago
       POOLSIDE_PASSWORD: ${POOLSIDE_PASSWORD:?Set POOLSIDE_PASSWORD in .env}
       AQUALINKD_URL: http://aqualinkd:80
