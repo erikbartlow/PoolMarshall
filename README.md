@@ -45,11 +45,17 @@ The default bind address is `127.0.0.1`. From a computer with SSH access, open a
 ssh -N -L 8080:127.0.0.1:8080 -L 6171:127.0.0.1:6171 your-user@PI_ADDRESS
 ```
 
-Open `http://localhost:8080` on that computer. Sign in with username **poolside** and the password from `.env`. No sample inspections or issues are preloaded. The dashboard works before the adapter is purchased.
+Open `http://localhost:8080` on that computer. Use the branded sign-in form with username **poolside** and the password from `.env`. Sessions expire after 12 hours or a dashboard restart; use **Sign out** to end a session. Both page footers show the release version from `app/VERSION`. No sample inspections or issues are preloaded. The dashboard works before the adapter is purchased.
 
-For a phone, arrange access through an authenticated VPN/reverse proxy to the Pi. The bundled HTTP dashboard is intended for a private network or SSH tunnel. Basic authentication by itself does not encrypt traffic. Do not expose either port to the public internet. AqualinkD's native interface has no username/password authentication. If you intentionally change `BIND_ADDRESS` to the Pi's LAN address for trusted-LAN use, both ports become reachable there; configure your network access accordingly. No tunnel, public ingress, or router changes are automated by this package.
+For a phone, arrange access through an authenticated VPN/reverse proxy to the Pi. The bundled HTTP dashboard is intended for a private network or SSH tunnel. Sign-in credentials and session cookies require HTTPS when accessed outside a trusted network. Do not expose either port to the public internet. AqualinkD's native interface has no username/password authentication. If you intentionally change `BIND_ADDRESS` to the Pi's LAN address for trusted-LAN use, both ports become reachable there; configure your network access accordingly. No tunnel, public ingress, or router changes are automated by this package.
 
 ## Add RS485 hardware
+
+The Jarvis dashboard deployment is in `/home/codedthought/PoolMarshall`, using
+`docker compose -f compose.yaml -f compose.jarvis.yaml up -d --build dashboard`.
+The Jarvis override publishes port 5187 and tags the ARM64 release image. Its existing
+Cloudflare route is `https://poolmarshall.codedthought.info`. Preserve `.env` and
+the `poolside_poolside-data` volume during updates. The hardware profile stays off.
 
 Have the panel's connections identified from its documentation by a qualified installer. Do not connect the board's power terminals to USB adapter data terminals. This package intentionally does not guess connector pin numbers, wire colors, or termination values.
 

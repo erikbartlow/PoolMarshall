@@ -1,4 +1,3 @@
-import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -7,9 +6,12 @@ import threading
 import unittest
 from unittest.mock import patch
 import io
+import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from http.cookiejar import CookieJar
+from urllib.request import build_opener, HTTPCookieProcessor
 
 spec = importlib.util.spec_from_file_location('server', Path(__file__).parent/'app/server.py')
 app = importlib.util.module_from_spec(spec)
@@ -31,6 +33,7 @@ class Tests(unittest.TestCase):
         app.UPSTREAM='http://127.0.0.1:'+str(cls.upstream.server_port)
         cls.http=ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
         cls.url='http://127.0.0.1:'+str(cls.http.server_port)
+        app.SESSIONS['test-api-session']=time.time()+app.SESSION_SECONDS
         for server in [cls.http,cls.upstream]: threading.Thread(target=server.serve_forever,daemon=True).start()
     @classmethod
     def tearDownClass(cls):
@@ -38,13 +41,63 @@ class Tests(unittest.TestCase):
         cls.tmp.cleanup()
     def request(self,path,method='GET',body=None,auth=True,write=True):
         headers={}
-        if auth: headers['Authorization']='Basic '+base64.b64encode(b'poolside:a-test-password-only').decode()
+        if auth: headers['Cookie']='poolmarshall_session=test-api-session'
         if write: headers['X-Poolside-Write']='1'
         req=Request(self.url+path,data=json.dumps(body).encode() if body is not None else None,headers=headers,method=method)
         try:
             with urlopen(req) as r:return r.status,json.load(r)
         except HTTPError as e:return e.code,None
     def test_auth_required(self): self.assertEqual(self.request('/api/state',auth=False)[0],401)
+    def browser(self):
+        return build_opener(HTTPCookieProcessor(CookieJar()))
+    def login(self, browser, password='a-test-password-only', write=True):
+        headers={'Content-Type':'application/json'}
+        if write: headers['X-Poolside-Write']='1'
+        return browser.open(Request(self.url+'/api/login',data=json.dumps({'username':'poolside','password':password}).encode(),headers=headers))
+    def test_login_page_replaces_browser_prompt(self):
+        with urlopen(self.url+'/') as response:
+            self.assertTrue(response.url.endswith('/login'))
+            html=response.read()
+            self.assertIn(b'autocomplete="current-password"',html)
+            self.assertIn(('PoolMarshall v'+app.VERSION).encode(),html)
+            self.assertIsNone(response.headers.get('WWW-Authenticate'))
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.url+'/api/state')
+        self.assertIsNone(error.exception.headers.get('WWW-Authenticate'))
+        error.exception.close()
+    def test_session_login_logout_and_expiry(self):
+        browser=self.browser()
+        with self.login(browser) as response:
+            cookie=response.headers['Set-Cookie']
+            self.assertIn('HttpOnly',cookie);self.assertIn('SameSite=Lax',cookie)
+            token=cookie.split(';')[0].split('=',1)[1]
+        with browser.open(self.url+'/api/state') as response:self.assertEqual(response.status,200)
+        with browser.open(self.url+'/') as response:self.assertIn(('PoolMarshall v'+app.VERSION).encode(),response.read())
+        with browser.open(Request(self.url+'/api/logout',data=b'',headers={'X-Poolside-Write':'1'})) as response:self.assertEqual(response.status,204)
+        with self.assertRaises(HTTPError) as error:
+            urlopen(Request(self.url+'/api/state',headers={'Cookie':'poolmarshall_session='+token}))
+        self.assertEqual(error.exception.code,401);error.exception.close()
+        with self.login(browser) as response:token=response.headers['Set-Cookie'].split(';')[0].split('=',1)[1]
+        app.SESSIONS[token]=0
+        with self.assertRaises(HTTPError) as error:browser.open(self.url+'/api/state')
+        self.assertEqual(error.exception.code,401);error.exception.close()
+    def test_login_guards_and_secure_cookie(self):
+        browser=self.browser()
+        for password,write,status in [('wrong',True,401),('a-test-password-only',False,403)]:
+            with self.assertRaises(HTTPError) as error:self.login(browser,password,write)
+            self.assertEqual(error.exception.code,status);error.exception.close()
+        request=Request(self.url+'/api/login',data=json.dumps({'username':'poolside','password':'a-test-password-only'}).encode(),headers={'X-Poolside-Write':'1','X-Forwarded-Proto':'https'})
+        with urlopen(request) as response:self.assertIn('; Secure',response.headers['Set-Cookie'])
+    def test_login_rate_limit(self):
+        browser=self.browser()
+        try:
+            app.LOGIN_FAILURES.clear()
+            for _ in range(8):
+                with self.assertRaises(HTTPError) as error:self.login(browser,'wrong')
+                self.assertEqual(error.exception.code,401);error.exception.close()
+            with self.assertRaises(HTTPError) as error:self.login(browser)
+            self.assertEqual(error.exception.code,429);error.exception.close()
+        finally:app.LOGIN_FAILURES.clear()
     def test_persistence_and_conflicts(self):
         payload={'tasks':{},'logs':[{'kind':'Water test','ph':'7.4'}],'findings':[],'settings':{},'care':{'active':'main','profiles':[{'id':'main','gallons':18000}],'products':[]}}
         self.assertEqual(self.request('/api/state','PUT',{'revision':0,'data':payload})[0],200)
@@ -68,7 +121,7 @@ class Tests(unittest.TestCase):
         finally:app.CONTROL_ENABLED=False
     def test_feature_assets_are_served(self):
         for path,mime in [('/features.js','text/javascript'),('/pool-math.js','text/javascript'),('/sw.js','text/javascript')]:
-            req=Request(self.url+path,headers={'Authorization':'Basic '+base64.b64encode(b'poolside:a-test-password-only').decode()})
+            req=Request(self.url+path,headers={'Cookie':'poolmarshall_session=test-api-session'})
             with urlopen(req) as r:
                 self.assertEqual(r.status,200);self.assertIn(mime,r.headers['Content-Type']);self.assertGreater(len(r.read()),100)
     def test_weather_uses_fixed_host_and_cache(self):
