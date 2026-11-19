@@ -1,6 +1,9 @@
 """Single-owner, private-network dashboard and read-only AqualinkD status bridge."""
+<<<<<<< HEAD
 import sys
 from contextlib import contextmanager
+=======
+>>>>>>> codex/local-signin-before-api-sync
 import hmac
 import json
 import os
@@ -116,6 +119,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.session_valid():
             return True
         self.reply(401, {'error': 'Sign in to continue.'})
+<<<<<<< HEAD
         return False
 
     def licensed(self):
@@ -123,6 +127,8 @@ class Handler(BaseHTTPRequestHandler):
         if status["isValid"]:
             return True
         self.reply(402, {"error": status["message"], "license": status})
+=======
+>>>>>>> codex/local-signin-before-api-sync
         return False
 
     def do_GET(self):

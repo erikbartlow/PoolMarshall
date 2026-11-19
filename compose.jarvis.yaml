@@ -1,5 +1,9 @@
 services:
   dashboard:
+<<<<<<< HEAD
     image: poolmarshall:1.1.2-arm64
+=======
+    image: poolmarshall:1.1.0-arm64
+>>>>>>> codex/local-signin-before-api-sync
     ports: !override
       - "0.0.0.0:5187:8080"
